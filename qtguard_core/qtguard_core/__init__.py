@@ -1,1 +1,0 @@
-"""QTGuard core package."""
