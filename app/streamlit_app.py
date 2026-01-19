@@ -1,3 +1,12 @@
+import os
+import sys
+
+# Ensure repo root is on the Python path when running `streamlit run app/streamlit_app.py`
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+
 import streamlit as st
 from qtguard_core.guardrails import build_safe_output
 
