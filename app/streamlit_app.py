@@ -1,14 +1,13 @@
 import os
 import sys
 
-# Ensure repo root is on the Python path when running `streamlit run app/streamlit_app.py`
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Force repo root onto sys.path so `qtguard_core` imports work when running from /app
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 import streamlit as st
 from qtguard_core.guardrails import build_safe_output
-
 
 st.set_page_config(page_title="QTGuard", layout="wide")
 st.title("QTGuard — Offline QT Medication Safety Copilot")
@@ -43,3 +42,4 @@ if st.button("Generate plan"):
 
     st.subheader("Audit view")
     st.json(output.model_dump())
+
