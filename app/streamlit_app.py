@@ -27,6 +27,25 @@ def load_demo_outputs(path: str) -> dict:
     return demos
 
 
+def render_audit_view(audit_view: dict):
+    missing = audit_view.get("missing_data", [])
+    notes = audit_view.get("notes", [])
+
+    st.markdown("**Missing data**")
+    if missing:
+        for item in missing:
+            st.write(f"- {item}")
+    else:
+        st.write("- None")
+
+    st.markdown("**Notes**")
+    if notes:
+        for n in notes:
+            st.write(f"- {n}")
+    else:
+        st.write("- None")
+
+
 DEMOS = load_demo_outputs(ASSETS_PATH)
 
 demo_labels = {
@@ -36,10 +55,12 @@ demo_labels = {
 
 available_demo_keys = [k for k in demo_labels.keys() if k in DEMOS]
 
-
 st.set_page_config(page_title="QTGuard", layout="wide")
 st.title("QTGuard — Offline QT Medication Safety Copilot")
-st.caption("Research/demo prototype for decision support. Not a medical device. Do not use for autonomous clinical decisions.")
+st.caption(
+    "Research/demo prototype for decision support. Not a medical device. "
+    "Do not use for autonomous clinical decisions."
+)
 
 st.markdown(
     "Demo mode loads precomputed MedGemma outputs (from `assets/outputs.jsonl`) for reliability in recordings. "
@@ -83,7 +104,7 @@ if st.button("Generate plan"):
         st.write(out.get("patient_counseling", ""))
 
         st.subheader("Audit view")
-        st.json(out.get("audit_view", {}))
+        render_audit_view(out.get("audit_view", {}))
 
     # Custom mode: fall back to guardrails
     else:
@@ -100,4 +121,5 @@ if st.button("Generate plan"):
         st.write(output.patient_counseling)
 
         st.subheader("Audit view")
-        st.json(output.model_dump())
+        render_audit_view(output.model_dump().get("audit_view", {}))
+
