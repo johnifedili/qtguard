@@ -26,26 +26,6 @@ def _evidence_notes(evidence: List[Evidence], top_n: int = 5) -> List[str]:
     return notes
 
 
-def _strip_model_noise(notes: List[str]) -> List[str]:
-    """
-    Remove any legacy model/inference errors that can appear in guardrail notes.
-    In retrieval-driven mode, we don't want gated-model noise to dominate the audit.
-    """
-    cleaned: List[str] = []
-    for n in notes:
-        lower = n.lower()
-        if "medgemma inference error" in lower:
-            continue
-        if "gated repo" in lower:
-            continue
-        if "cannot access gated repo" in lower:
-            continue
-        if "401 client error" in lower:
-            continue
-        cleaned.append(n)
-    return cleaned
-
-
 def _is_evidence_weak(
     evidence: List[Evidence],
     score_threshold: float,
@@ -57,6 +37,7 @@ def _is_evidence_weak(
       - no evidence, OR
       - top score < score_threshold, OR
       - top score is not clearly better than second score (low margin)
+
     Returns: (weak, top_score, margin)
     """
     if not evidence:
@@ -97,10 +78,17 @@ def run_qtguard_with_retrieval(
     # Start from your existing safe output structure
     base = build_safe_output(mini_chart).model_dump()
 
-    # Clean noisy legacy notes (e.g., gated MedGemma errors) in retrieval mode
+    # ---- CLEAN AUDIT NOTES: remove legacy MedGemma gated-repo noise ----
     audit = base.get("audit_view") or {}
     notes = audit.get("notes") or []
-    notes = _strip_model_noise(notes)
+    notes = [
+        n for n in notes
+        if "MedGemma inference error" not in n
+        and "gated repo" not in n
+        and "Cannot access gated repo" not in n
+        and "401 Client Error" not in n
+    ]
+    # -------------------------------------------------------------------
 
     # Make output explicitly retrieval-aware
     if weak:
@@ -114,7 +102,6 @@ def run_qtguard_with_retrieval(
             "Add/expand trusted references in the knowledge base to enable citation-grounded recommendations.",
         ] + (base.get("action_plan") or [])
     else:
-        # Keep the guardrail-safe content but mark that retrieval supports triage
         base["risk_summary"] = (
             (base.get("risk_summary") or "").rstrip()
             + " Evidence was retrieved and reranked to support this triage."
@@ -123,10 +110,14 @@ def run_qtguard_with_retrieval(
             f"Evidence available: see [E1]–[E{min(top_n_notes, len(evidence))}] in Audit view (top score={top_score:.3f}, margin={margin:.3f})."
         ] + (base.get("action_plan") or [])
 
-    # Attach evidence trail to audit view
-    notes.append(f"Top evidence score={top_score:.3f}; margin={margin:.3f}; weak={weak}; score_threshold={score_threshold:.3f}")
+    # Attach retrieval diagnostics + evidence trail to audit view
+    notes.append(
+        f"Top evidence score={top_score:.3f}; margin={margin:.3f}; weak={weak}; "
+        f"score_threshold={score_threshold:.3f}; margin_threshold={margin_threshold:.3f}"
+    )
     notes.append(f"Retrieval query: {query}")
     notes.extend(_evidence_notes(evidence, top_n=top_n_notes))
+
     audit["notes"] = notes
     base["audit_view"] = audit
 
