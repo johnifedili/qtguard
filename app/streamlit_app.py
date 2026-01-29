@@ -1,3 +1,4 @@
+cat > app/streamlit_app.py <<'EOF'
 import os
 import sys
 import json
@@ -101,7 +102,7 @@ with st.sidebar:
         help="If the top evidence score is below this, QTGuard will recommend safe deferral.",
     )
 
-    # Optional: show current value to avoid confusion
+    # Visible debug so you never guess again
     st.write(f"use_retrieval_output = {use_retrieval_output}")
 
 selected_label = st.selectbox(
@@ -181,4 +182,5 @@ if st.button("Generate plan"):
 
             st.subheader("Audit view")
             render_audit_view(output.get("audit_view", {}))
+EOF
 
