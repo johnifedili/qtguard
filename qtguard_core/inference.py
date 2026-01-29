@@ -12,16 +12,18 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 from qtguard_core.prompts import build_prompt
 from qtguard_core.schema import QTGuardOutput
 
-
 def _best_device() -> torch.device:
-    # Prefer Apple Silicon GPU (MPS) if available; otherwise CPU.
+    if torch.cuda.is_available():
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
 
 
 def _best_dtype(device: torch.device) -> torch.dtype:
-    # MPS generally prefers float16; CPU safest with float32.
+    if device.type == "cuda":
+        # bfloat16 is often stable on modern GPUs; fallback to float16 if needed
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     if device.type == "mps":
         return torch.float16
     return torch.float32
