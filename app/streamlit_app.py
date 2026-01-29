@@ -61,12 +61,12 @@ def render_evidence_panel(evidence):
             st.caption(f"chunk_id: {e.chunk_id}")
 
 
-# Load demos
+# Load demos (mini-charts only; output will NOT come from DEMOS anymore)
 DEMOS = load_demo_outputs(ASSETS_PATH)
 
 demo_labels = {
-    "high_risk_polypharmacy": "High-risk polypharmacy (MedGemma output)",
-    "missing_data_deferral": "Missing data deferral (guardrail override)",
+    "high_risk_polypharmacy": "High-risk polypharmacy (Mini-chart)",
+    "missing_data_deferral": "Missing data deferral (Mini-chart)",
 }
 
 available_demo_keys = [k for k in demo_labels.keys() if k in DEMOS]
@@ -80,23 +80,18 @@ st.caption(
 )
 
 st.markdown(
-    "Demo mode loads precomputed MedGemma outputs (from `assets/outputs.jsonl`) for reliability in recordings.\n\n"
-    "**New:** You can now run a retrieval-driven output pipeline that retrieves evidence (BM25+vector) and reranks it "
-    "for transparency and safer deferral when evidence is weak."
+    "**This version generates output via retrieval-driven logic** (BM25 + vector retrieval + reranking + safety gating). "
+    "Demo cases only provide sample mini-charts; output is computed live from the retriever."
 )
 
 with st.sidebar:
-    st.markdown("### Output mode")
-    use_retrieval_output = st.checkbox(
-        "Use retrieval-driven output (recommended)",
-        value=True,
-        help="If enabled, QTGuard output is generated from retriever + safety gating, not from demo/precomputed JSON.",
-    )
+    st.markdown("### Retrieval settings")
     score_threshold = st.slider(
         "Evidence score threshold",
         0.0, 5.0, 1.5, 0.1,
         help="If the top evidence score is below this, QTGuard will recommend safe deferral.",
     )
+    st.caption("Tip: if you see frequent deferrals, lower the threshold slightly and/or expand your KB sources.")
 
 selected_label = st.selectbox(
     "Select a demo case",
@@ -120,60 +115,25 @@ mini_chart = st.text_area(
 )
 
 if st.button("Generate plan"):
-    # If enabled, ALWAYS generate output via retriever-driven pipeline
-    if use_retrieval_output:
-        out_dict, evidence, weak = run_qtguard_with_retrieval(
-            mini_chart,
-            score_threshold=score_threshold,
-        )
+    # ALWAYS generate via retrieval-driven pipeline (demo and custom)
+    out_dict, evidence, weak = run_qtguard_with_retrieval(
+        mini_chart,
+        score_threshold=score_threshold,
+    )
 
-        render_evidence_panel(evidence)
-        st.divider()
+    render_evidence_panel(evidence)
+    st.divider()
 
-        st.subheader("Risk summary")
-        st.write(out_dict.get("risk_summary", ""))
+    st.subheader("Risk summary")
+    st.write(out_dict.get("risk_summary", ""))
 
-        st.subheader("Action plan")
-        for i, item in enumerate(out_dict.get("action_plan", []), start=1):
-            st.write(f"{i}. {item}")
+    st.subheader("Action plan")
+    for i, item in enumerate(out_dict.get("action_plan", []), start=1):
+        st.write(f"{i}. {item}")
 
-        st.subheader("Patient-friendly counseling")
-        st.write(out_dict.get("patient_counseling", ""))
+    st.subheader("Patient-friendly counseling")
+    st.write(out_dict.get("patient_counseling", ""))
 
-        st.subheader("Audit view")
-        render_audit_view(out_dict.get("audit_view", {}))
+    st.subheader("Audit view")
+    render_audit_view(out_dict.get("audit_view", {}))
 
-    # Otherwise, keep your original behavior (demo JSON or guardrails)
-    else:
-        if selected_case_id and selected_case_id in DEMOS:
-            out = DEMOS[selected_case_id]["output"]
-
-            st.subheader("Risk summary")
-            st.write(out.get("risk_summary", ""))
-
-            st.subheader("Action plan")
-            for i, item in enumerate(out.get("action_plan", []), start=1):
-                st.write(f"{i}. {item}")
-
-            st.subheader("Patient-friendly counseling")
-            st.write(out.get("patient_counseling", ""))
-
-            st.subheader("Audit view")
-            render_audit_view(out.get("audit_view", {}))
-        else:
-            # Minimal fallback (guardrails) if you disable retrieval output
-            from qtguard_core.guardrails import build_safe_output
-            output = build_safe_output(mini_chart).model_dump()
-
-            st.subheader("Risk summary")
-            st.write(output.get("risk_summary", ""))
-
-            st.subheader("Action plan")
-            for i, item in enumerate(output.get("action_plan", []), start=1):
-                st.write(f"{i}. {item}")
-
-            st.subheader("Patient-friendly counseling")
-            st.write(output.get("patient_counseling", ""))
-
-            st.subheader("Audit view")
-            render_audit_view(output.get("audit_view", {}))
