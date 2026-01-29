@@ -1,90 +1,86 @@
-# qtguard_core/retrieval.py
 from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from functools import lru_cache
+from typing import List, Dict, Any
 
+import numpy as np
+import faiss
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, CrossEncoder
-import faiss
-import numpy as np
 
 
 @dataclass
 class Evidence:
-    doc_id: str
     title: str
     section: str
+    chunk_id: str
     text: str
     score: float
 
 
 class HybridRetriever:
+    """
+    Hybrid retrieval:
+      1) BM25 keyword retrieval
+      2) Dense vector retrieval (SentenceTransformer + FAISS)
+      3) Cross-encoder reranking (query, chunk) -> relevance logit
+
+    Notes:
+      - Cross-encoder scores are raw logits and can be negative.
+      - We deduplicate by chunk_id after reranking.
+      - This is designed to work locally and on Kaggle without GPU-specific FAISS.
+    """
+
     def __init__(
         self,
-        docs_path: str = "assets/knowledge/chunks.jsonl",
+        chunks_path: str = "assets/knowledge/chunks.jsonl",
         embed_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        top_k: int = 8,
-        candidate_k: int = 40,
+        candidate_k: int = 30,
+        top_k: int = 6,
     ):
-        self.top_k = top_k
         self.candidate_k = candidate_k
+        self.top_k = top_k
 
-        # Load chunk corpus
-        self.chunks: List[Dict[str, Any]] = []
+        # Load corpus
+        self.rows: List[Dict[str, Any]] = []
         texts: List[str] = []
-        with open(docs_path, "r", encoding="utf-8") as f:
+        with open(chunks_path, "r", encoding="utf-8") as f:
             for line in f:
-                row = json.loads(line)
-                self.chunks.append(row)
-                texts.append(row["text"])
+                r = json.loads(line)
+                # Defensive checks
+                if "text" not in r:
+                    continue
+                self.rows.append(r)
+                texts.append(r["text"])
 
-        # BM25
-        self._bm25_tokens = [t.lower().split() for t in texts]
-        self.bm25 = BM25Okapi(self._bm25_tokens)
+        if not self.rows:
+            raise RuntimeError(f"No chunks loaded from {chunks_path}. Is the file empty?")
 
-        # Embeddings + FAISS
+        # BM25 setup
+        self.bm25_tokens = [t.lower().split() for t in texts]
+        self.bm25 = BM25Okapi(self.bm25_tokens)
+
+        # Dense embeddings + FAISS
         self.embedder = SentenceTransformer(embed_model)
-        embs = self.embedder.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+        embs = self.embedder.encode(
+            texts,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
         self.embs = np.asarray(embs, dtype=np.float32)
 
+        # Inner-product index (since vectors are normalized, IP == cosine similarity)
         self.index = faiss.IndexFlatIP(self.embs.shape[1])
         self.index.add(self.embs)
 
-        # Re-ranker
+        # Cross-encoder reranker
         self.reranker = CrossEncoder(rerank_model)
 
-    def search(self, query: str) -> List[Evidence]:
-        # 1) BM25 candidates
-        bm25_scores = self.bm25.get_scores(query.lower().split())
-        bm25_top = np.argsort(bm25_scores)[::-1][: self.candidate_k].tolist()
+    def _bm25_candidates(self, query: str) -> List[int]:
+        scores = self.bm25.get_scores(query.lower().split())
+        return np.argsort(scores)[::-1][: self.candidate_k].tolist()
 
-        # 2) Vector candidates
-        q = self.embedder.encode([query], normalize_embeddings=True)
-        q = np.asarray(q, dtype=np.float32)
-        _, vec_top = self.index.search(q, self.candidate_k)
-        vec_top = vec_top[0].tolist()
-
-        # 3) Union + dedupe
-        cand_ids = list(dict.fromkeys(bm25_top + vec_top))[: (2 * self.candidate_k)]
-
-        candidates = [self.chunks[i] for i in cand_ids]
-        pairs = [[query, c["text"]] for c in candidates]
-
-        # 4) Re-rank
-        rr_scores = self.reranker.predict(pairs)
-        ranked = sorted(zip(candidates, rr_scores), key=lambda x: x[1], reverse=True)[: self.top_k]
-
-        out: List[Evidence] = []
-        for c, s in ranked:
-            out.append(
-                Evidence(
-                    doc_id=c.get("doc_id", ""),
-                    title=c.get("title", ""),
-                    section=c.get("section", ""),
-                    text=c["text"],
-                    score=float(s),
-                )
-            )
-        return out
+    def _vector_candidate
