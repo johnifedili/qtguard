@@ -3,3 +3,7 @@ pydantic
 transformers
 accelerate
 torch
+sentence-transformers
+rank-bm25
+faiss-cpu
+numpy
