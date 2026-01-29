@@ -1,4 +1,3 @@
-cat > app/streamlit_app.py <<'EOF'
 import os
 import sys
 import json
@@ -83,7 +82,8 @@ st.caption(
 
 st.markdown(
     "Demo mode loads precomputed MedGemma outputs (from `assets/outputs.jsonl`) for reliability in recordings.\n\n"
-    "**New:** You can enable retrieval-driven output to generate plans using retrieved evidence + safety gating."
+    "**New:** Enable retrieval-driven output to generate plans using retrieved evidence + safety gating.\n\n"
+    "Note: cross-encoder relevance scores can be negative; tune thresholds accordingly."
 )
 
 with st.sidebar:
@@ -91,19 +91,21 @@ with st.sidebar:
     use_retrieval_output = st.checkbox(
         "Use retrieval-driven output (recommended)",
         value=True,
-        help="If enabled, QTGuard output is generated from retriever + safety gating (Kaggle-safe). "
+        help="If enabled, QTGuard output is generated from retrieval + safety gating. "
              "If disabled, demo cases show precomputed outputs and custom inputs use guardrails.",
     )
 
     st.markdown("### Retrieval settings")
     score_threshold = st.slider(
         "Evidence score threshold",
-        0.0, 5.0, 1.5, 0.1,
-        help="If the top evidence score is below this, QTGuard will recommend safe deferral.",
+        -10.0, 10.0, -5.0, 0.1,
+        help="Cross-encoder relevance scores are raw logits and may be negative. "
+             "If the top score is below this, QTGuard will recommend safe deferral.",
     )
 
-    # Visible debug so you never guess again
+    st.caption("Debug")
     st.write(f"use_retrieval_output = {use_retrieval_output}")
+    st.write(f"score_threshold = {score_threshold:.1f}")
 
 selected_label = st.selectbox(
     "Select a demo case",
@@ -127,8 +129,8 @@ mini_chart = st.text_area(
 )
 
 if st.button("Generate plan"):
-    # Retrieval-driven pipeline (recommended)
     if use_retrieval_output:
+        # Retrieval-driven pipeline
         out_dict, evidence, weak = run_qtguard_with_retrieval(
             mini_chart,
             score_threshold=score_threshold,
@@ -149,9 +151,8 @@ if st.button("Generate plan"):
 
         st.subheader("Audit view")
         render_audit_view(out_dict.get("audit_view", {}))
-
-    # Original behavior (demo JSON or guardrails)
     else:
+        # Original behavior (demo JSON or guardrails)
         if selected_case_id and selected_case_id in DEMOS:
             out = DEMOS[selected_case_id]["output"]
 
@@ -168,6 +169,7 @@ if st.button("Generate plan"):
             st.subheader("Audit view")
             render_audit_view(out.get("audit_view", {}))
         else:
+            # Guardrails fallback for custom inputs
             output = build_safe_output(mini_chart).model_dump()
 
             st.subheader("Risk summary")
@@ -182,5 +184,3 @@ if st.button("Generate plan"):
 
             st.subheader("Audit view")
             render_audit_view(output.get("audit_view", {}))
-EOF
-
