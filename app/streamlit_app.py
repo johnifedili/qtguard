@@ -96,9 +96,10 @@ with st.sidebar:
     )
 
     st.markdown("### Retrieval settings")
+    # Default is now 0.0 (so your demo doesn't accidentally deflect)
     score_threshold = st.slider(
         "Evidence score threshold",
-        -10.0, 10.0, -5.0, 0.1,
+        -10.0, 10.0, 0.0, 0.1,
         help="Cross-encoder relevance scores are raw logits and may be negative. "
              "If the top score is below this, QTGuard will recommend safe deferral.",
     )
