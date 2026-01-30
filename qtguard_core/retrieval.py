@@ -29,8 +29,7 @@ class HybridRetriever:
 
     Notes:
       - Cross-encoder scores are raw logits and can be negative.
-      - We deduplicate by chunk_id after reranking.
-      - This is designed to work locally and on Kaggle without GPU-specific FAISS.
+      - Deduplicates by chunk_id after reranking.
     """
 
     def __init__(
@@ -50,7 +49,6 @@ class HybridRetriever:
         with open(chunks_path, "r", encoding="utf-8") as f:
             for line in f:
                 r = json.loads(line)
-                # Defensive checks
                 if "text" not in r:
                     continue
                 self.rows.append(r)
@@ -59,20 +57,15 @@ class HybridRetriever:
         if not self.rows:
             raise RuntimeError(f"No chunks loaded from {chunks_path}. Is the file empty?")
 
-        # BM25 setup
+        # BM25
         self.bm25_tokens = [t.lower().split() for t in texts]
         self.bm25 = BM25Okapi(self.bm25_tokens)
 
-        # Dense embeddings + FAISS
+        # Dense embeddings + FAISS (cosine via inner product on normalized vectors)
         self.embedder = SentenceTransformer(embed_model)
-        embs = self.embedder.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+        embs = self.embedder.encode(texts, normalize_embeddings=True, show_progress_bar=False)
         self.embs = np.asarray(embs, dtype=np.float32)
 
-        # Inner-product index (since vectors are normalized, IP == cosine similarity)
         self.index = faiss.IndexFlatIP(self.embs.shape[1])
         self.index.add(self.embs)
 
@@ -83,4 +76,53 @@ class HybridRetriever:
         scores = self.bm25.get_scores(query.lower().split())
         return np.argsort(scores)[::-1][: self.candidate_k].tolist()
 
-    def _vector_candidate
+    def _vector_candidates(self, query: str) -> List[int]:
+        q = self.embedder.encode([query], normalize_embeddings=True, show_progress_bar=False)
+        q = np.asarray(q, dtype=np.float32)
+        _, idx = self.index.search(q, self.candidate_k)
+        return idx[0].tolist()
+
+    def search(self, query: str) -> List[Evidence]:
+        # Candidates from BM25 and vectors
+        bm25_top = self._bm25_candidates(query)
+        vec_top = self._vector_candidates(query)
+
+        # Union (order-preserving)
+        cand_ids = list(dict.fromkeys(bm25_top + vec_top))
+        candidates = [self.rows[i] for i in cand_ids if 0 <= i < len(self.rows)]
+        if not candidates:
+            return []
+
+        # Rerank
+        pairs = [[query, c["text"]] for c in candidates]
+        rr_scores = self.reranker.predict(pairs)
+        ranked = sorted(zip(candidates, rr_scores), key=lambda x: x[1], reverse=True)
+
+        # Deduplicate by chunk_id and keep top_k
+        seen = set()
+        out: List[Evidence] = []
+        for c, s in ranked:
+            cid = c.get("chunk_id", "")
+            if cid and cid in seen:
+                continue
+            if cid:
+                seen.add(cid)
+
+            out.append(
+                Evidence(
+                    title=c.get("title", ""),
+                    section=c.get("section", ""),
+                    chunk_id=cid,
+                    text=c.get("text", ""),
+                    score=float(s),
+                )
+            )
+            if len(out) >= self.top_k:
+                break
+
+        return out
+
+
+@lru_cache(maxsize=1)
+def get_retriever() -> HybridRetriever:
+    return HybridRetriever()
