@@ -93,13 +93,15 @@ with st.sidebar:
         value=True,
         help="If enabled, QTGuard output is generated from retrieval + safety gating. "
              "If disabled, demo cases show precomputed outputs and custom inputs use guardrails.",
+        key="use_retrieval_output_v1",
     )
 
     st.markdown("### Retrieval settings")
-    # Default is now 0.0 (so your demo doesn't accidentally deflect)
+    # IMPORTANT: new key forces Streamlit to stop reusing the old cached 1.5 value
     score_threshold = st.slider(
         "Evidence score threshold",
         -10.0, 10.0, 0.0, 0.1,
+        key="score_threshold_v2",
         help="Cross-encoder relevance scores are raw logits and may be negative. "
              "If the top score is below this, QTGuard will recommend safe deferral.",
     )
@@ -185,3 +187,4 @@ if st.button("Generate plan"):
 
             st.subheader("Audit view")
             render_audit_view(output.get("audit_view", {}))
+
