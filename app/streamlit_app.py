@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import re
 import streamlit as st
 
 # Ensure repo root is on sys.path when running `streamlit run app/streamlit_app.py`
@@ -67,6 +68,73 @@ def render_evidence_panel(evidence):
             st.write(getattr(e, "text", ""))
             if chunk_id is not None:
                 st.caption(f"chunk_id: {chunk_id}")
+
+
+def _extract_missing_from_text(mini_chart: str) -> list[str]:
+    """
+    Detect explicit missing markers in the mini-chart (e.g., QTc=unknown, Mg: n/a).
+    This is UI-level sanity so audit_view doesn't contradict safe deferral outputs.
+    """
+    t = (mini_chart or "").lower()
+    missing = []
+    tokens = r"(unknown|n\/a|na|none|null|pending|tbd)"
+
+    if re.search(r"(qtc|qt\s*c|qt interval)\s*[:=]\s*" + tokens + r"\b", t):
+        missing.append("QTc")
+    if re.search(r"(potassium|\bk)\s*[:=]\s*" + tokens + r"\b", t):
+        missing.append("Potassium (K)")
+    if re.search(r"(magnesium|\bmg)\s*[:=]\s*" + tokens + r"\b", t):
+        missing.append("Magnesium (Mg)")
+
+    return missing
+
+
+def _audit_fix_missing(out_dict: dict, mini_chart: str) -> dict:
+    """
+    Ensure audit_view.missing_data + notes are consistent with deferral language and explicit unknown values.
+    This does NOT change model behavior; it only fixes audit metadata shown in the UI.
+    """
+    audit = out_dict.get("audit_view") or {}
+    missing = audit.get("missing_data") or []
+    missing_set = set(missing)
+
+    # 1) If the action_plan contains a safe deferral message, extract missing labels from it
+    plan_text = "\n".join(out_dict.get("action_plan", []) or []).lower()
+    if "missing key inputs" in plan_text:
+        # crude but effective: pull items after the colon
+        # e.g., "Safe deferral: Missing key inputs: QTc, K."
+        m = re.search(r"missing key inputs\s*:\s*([a-z0-9,\-\s\(\)]+)", plan_text)
+        if m:
+            raw = m.group(1)
+            for token in [x.strip() for x in raw.split(",")]:
+                if not token:
+                    continue
+                if "qtc" in token:
+                    missing_set.add("QTc")
+                if "potassium" in token or token in {"k"}:
+                    missing_set.add("Potassium (K)")
+                if "magnesium" in token or token in {"mg"}:
+                    missing_set.add("Magnesium (Mg)")
+
+    # 2) If mini-chart explicitly has unknown/pending values, treat them as missing
+    for lab in _extract_missing_from_text(mini_chart):
+        missing_set.add(lab)
+
+    missing = sorted(missing_set)
+    audit["missing_data"] = missing
+
+    # 3) Fix notes so they don't contradict missing_data
+    notes = audit.get("notes") or []
+    notes = [n for n in notes if "Guardrails check passed" not in n]
+
+    if missing:
+        notes.insert(0, f"Guardrails: missing required inputs: {', '.join(missing)}.")
+    else:
+        notes.insert(0, "Guardrails check passed for required inputs (QTc, K, Mg).")
+
+    audit["notes"] = notes
+    out_dict["audit_view"] = audit
+    return out_dict
 
 
 # Load demos
@@ -142,14 +210,23 @@ if "last_result" not in st.session_state:
     st.session_state["last_result"] = None
 
 if st.button("Generate plan"):
+    mini_chart_clean = (mini_chart or "").strip()
+    if not mini_chart_clean:
+        st.warning("Please paste a mini-chart first (or select a demo case).")
+        st.stop()
+
     with st.spinner("Generating..."):
         try:
             if use_retrieval_output:
                 # Retrieval-driven pipeline
                 out_dict, evidence, weak = run_qtguard_with_retrieval(
-                    mini_chart,
+                    mini_chart_clean,
                     score_threshold=score_threshold,
                 )
+
+                # UI-level audit consistency fix (prevents missing-data contradictions)
+                out_dict = _audit_fix_missing(out_dict, mini_chart_clean)
+
                 st.session_state["last_result"] = {
                     "mode": "retrieval",
                     "out": out_dict,
@@ -169,7 +246,7 @@ if st.button("Generate plan"):
                         "selected_case_id": selected_case_id,
                     }
                 else:
-                    output = build_safe_output(mini_chart).model_dump()
+                    output = build_safe_output(mini_chart_clean).model_dump()
                     st.session_state["last_result"] = {
                         "mode": "guardrails",
                         "out": output,
@@ -204,3 +281,8 @@ if st.session_state["last_result"] is not None:
 
     st.subheader("Audit view")
     render_audit_view(out_dict.get("audit_view", {}))
+
+
+
+
+ChatGPT can make mistakes. Check important info.
