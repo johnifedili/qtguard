@@ -15,11 +15,40 @@ Given a mini-chart (med list + QTc + key labs + risk factors), QTGuard generates
 > Disclaimer: QTGuard is a research/demo prototype for decision support. It is not a medical device and must not be used for autonomous clinical decisions.
 
 ---
-
 ## Quickstart (local)
-### 1) Create a virtual environment
-```bash
-python -m venv .venv
-source .venv/bin/activate   # macOS/Linux
-# .venv\Scripts\activate    # Windows PowerShell
-```
+
+1) Create a virtual environment:
+- `python -m venv .venv`
+- `source .venv/bin/activate`  # macOS/Linux
+- `.venv\Scripts\activate`     # Windows (PowerShell)
+
+2) Install dependencies:
+- `pip install -U pip`
+- `pip install -r requirements.txt`
+
+3) Run the Streamlit demo (recommended):
+- `STREAMLIT_SERVER_FILE_WATCHER_TYPE=none python -m streamlit run app/streamlit_app.py`
+
+Open in your browser:
+- `http://127.0.0.1:8501` (preferred)
+- `http://localhost:8501`
+
+## Offline evaluation harness
+
+QTGuard includes an offline evaluation harness that measures:
+- **Deferral accuracy** (safe deferral when key inputs are missing)
+- **Evidence keyword recall** (retrieval surfaces expected mitigation concepts)
+- **Plan keyword recall** (generated plan includes expected actions)
+- **Composite score** (quick iteration metric)
+
+Run the eval suite:
+- `python scripts/eval.py`
+
+Saved artifacts (written per run):
+- `reports/eval_runs/<YYYYMMDD_HHMMSS>/summary.json`
+- `reports/eval_runs/<YYYYMMDD_HHMMSS>/per_case.jsonl`
+
+Optional: keep eval reports out of git by adding this line to `.gitignore`:
+- `reports/`
+
+
