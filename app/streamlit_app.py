@@ -54,12 +54,19 @@ def render_evidence_panel(evidence):
         return
 
     for i, e in enumerate(evidence, start=1):
+        title = getattr(e, "title", "Evidence")
+        section = getattr(e, "section", "")
+        score = getattr(e, "score", None)
+        chunk_id = getattr(e, "chunk_id", None)
+
+        score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
         with st.expander(
-            f"[E{i}] {e.title} — {e.section} (score={e.score:.3f})",
+            f"[E{i}] {title} — {section} (score={score_str})",
             expanded=(i == 1),
         ):
-            st.write(e.text)
-            st.caption(f"chunk_id: {e.chunk_id}")
+            st.write(getattr(e, "text", ""))
+            if chunk_id is not None:
+                st.caption(f"chunk_id: {chunk_id}")
 
 
 # Load demos
@@ -97,7 +104,6 @@ with st.sidebar:
     )
 
     st.markdown("### Retrieval settings")
-    # IMPORTANT: new key forces Streamlit to stop reusing the old cached 1.5 value
     score_threshold = st.slider(
         "Evidence score threshold",
         -10.0, 10.0, 0.0, 0.1,
@@ -131,60 +137,70 @@ mini_chart = st.text_area(
     placeholder="Example: QTc=520 ms; K=3.1; Mg=1.6; Meds: ...",
 )
 
-if st.button("Generate plan"):
-    if use_retrieval_output:
-        # Retrieval-driven pipeline
-        out_dict, evidence, weak = run_qtguard_with_retrieval(
-            mini_chart,
-            score_threshold=score_threshold,
-        )
+# Persist last result so the page doesn't go "blank" on reruns
+if "last_result" not in st.session_state:
+    st.session_state["last_result"] = None
 
+if st.button("Generate plan"):
+    with st.spinner("Generating..."):
+        try:
+            if use_retrieval_output:
+                # Retrieval-driven pipeline
+                out_dict, evidence, weak = run_qtguard_with_retrieval(
+                    mini_chart,
+                    score_threshold=score_threshold,
+                )
+                st.session_state["last_result"] = {
+                    "mode": "retrieval",
+                    "out": out_dict,
+                    "evidence": evidence,
+                    "weak": weak,
+                    "selected_case_id": selected_case_id,
+                }
+            else:
+                # Original behavior (demo JSON or guardrails)
+                if selected_case_id and selected_case_id in DEMOS:
+                    out = DEMOS[selected_case_id]["output"]
+                    st.session_state["last_result"] = {
+                        "mode": "demo",
+                        "out": out,
+                        "evidence": None,
+                        "weak": None,
+                        "selected_case_id": selected_case_id,
+                    }
+                else:
+                    output = build_safe_output(mini_chart).model_dump()
+                    st.session_state["last_result"] = {
+                        "mode": "guardrails",
+                        "out": output,
+                        "evidence": None,
+                        "weak": None,
+                        "selected_case_id": None,
+                    }
+        except Exception as e:
+            st.session_state["last_result"] = None
+            st.error("Generate failed. See error details below.")
+            st.exception(e)
+
+# Render the last result (prevents blank screen + makes reruns stable)
+if st.session_state["last_result"] is not None:
+    result = st.session_state["last_result"]
+    out_dict = result["out"]
+    evidence = result.get("evidence")
+
+    if result.get("mode") == "retrieval":
         render_evidence_panel(evidence)
         st.divider()
 
-        st.subheader("Risk summary")
-        st.write(out_dict.get("risk_summary", ""))
+    st.subheader("Risk summary")
+    st.write(out_dict.get("risk_summary", ""))
 
-        st.subheader("Action plan")
-        for i, item in enumerate(out_dict.get("action_plan", []), start=1):
-            st.write(f"{i}. {item}")
+    st.subheader("Action plan")
+    for i, item in enumerate(out_dict.get("action_plan", []), start=1):
+        st.write(f"{i}. {item}")
 
-        st.subheader("Patient-friendly counseling")
-        st.write(out_dict.get("patient_counseling", ""))
+    st.subheader("Patient-friendly counseling")
+    st.write(out_dict.get("patient_counseling", ""))
 
-        st.subheader("Audit view")
-        render_audit_view(out_dict.get("audit_view", {}))
-    else:
-        # Original behavior (demo JSON or guardrails)
-        if selected_case_id and selected_case_id in DEMOS:
-            out = DEMOS[selected_case_id]["output"]
-
-            st.subheader("Risk summary")
-            st.write(out.get("risk_summary", ""))
-
-            st.subheader("Action plan")
-            for i, item in enumerate(out.get("action_plan", []), start=1):
-                st.write(f"{i}. {item}")
-
-            st.subheader("Patient-friendly counseling")
-            st.write(out.get("patient_counseling", ""))
-
-            st.subheader("Audit view")
-            render_audit_view(out.get("audit_view", {}))
-        else:
-            # Guardrails fallback for custom inputs
-            output = build_safe_output(mini_chart).model_dump()
-
-            st.subheader("Risk summary")
-            st.write(output.get("risk_summary", ""))
-
-            st.subheader("Action plan")
-            for i, item in enumerate(output.get("action_plan", []), start=1):
-                st.write(f"{i}. {item}")
-
-            st.subheader("Patient-friendly counseling")
-            st.write(output.get("patient_counseling", ""))
-
-            st.subheader("Audit view")
-            render_audit_view(output.get("audit_view", {}))
-
+    st.subheader("Audit view")
+    render_audit_view(out_dict.get("audit_view", {}))
