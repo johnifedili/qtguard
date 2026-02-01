@@ -7,3 +7,13 @@ sentence-transformers
 rank-bm25
 faiss-cpu
 numpy
+
+faiss-cpu
+rank-bm25
+sentence-transformers
+streamlit
+
+faiss-cpu
+rank-bm25
+sentence-transformers
+streamlit

@@ -1,3 +1,13 @@
+import streamlit as st
+
+@st.cache_resource
+def load_models():
+    from sentence_transformers import SentenceTransformer, CrossEncoder
+    embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return embedder, reranker
+
+
 import os
 import sys
 import json
