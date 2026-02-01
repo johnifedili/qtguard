@@ -141,16 +141,38 @@ def _audit_fix_missing(out_dict: dict, mini_chart: str) -> dict:
                 "Obtain ECG/QTc to complete risk assessment."
             )
 
-    # 3) Fix notes so they don't contradict missing_data
+    # 3) Fix notes so they don't contradict missing_data, and de-duplicate
     notes = audit.get("notes") or []
+
+    # Remove contradictory "passed" statements
     notes = [n for n in notes if "Guardrails check passed" not in n]
 
+    # Build the guardrails header we want
     if missing:
-        notes.insert(0, f"Guardrails: missing required inputs: {', '.join(missing)}.")
+        header = f"Guardrails: missing required inputs: {', '.join(missing)}."
     else:
-        notes.insert(0, "Guardrails check passed for required inputs (QTc, K, Mg).")
+        header = "Guardrails check passed for required inputs (QTc, K, Mg)."
 
-    audit["notes"] = notes
+    # Remove any existing duplicates of the header (or variants)
+    notes = [n for n in notes if not (n or "").strip().startswith("Guardrails: missing required inputs:")]
+    notes = [n for n in notes if (n or "").strip() != header]
+
+    # Put header at the top
+    notes.insert(0, header)
+
+    # Final de-dupe while preserving order
+    seen = set()
+    deduped = []
+    for n in notes:
+        key = (n or "").strip()
+        if not key:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(n)
+
+    audit["notes"] = deduped
     out_dict["audit_view"] = audit
     return out_dict
 
@@ -299,3 +321,4 @@ if st.session_state["last_result"] is not None:
 
     st.subheader("Audit view")
     render_audit_view(out_dict.get("audit_view", {}))
+
