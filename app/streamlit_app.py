@@ -299,4 +299,3 @@ if st.session_state["last_result"] is not None:
 
     st.subheader("Audit view")
     render_audit_view(out_dict.get("audit_view", {}))
-
