@@ -93,6 +93,7 @@ def _audit_fix_missing(out_dict: dict, mini_chart: str) -> dict:
     """
     Ensure audit_view.missing_data + notes are consistent with deferral language and explicit unknown values.
     This does NOT change model behavior; it only fixes audit metadata shown in the UI.
+    Additionally, when QTc is missing, rewrite risk_summary to avoid misleading "high-risk signals present" language.
     """
     audit = out_dict.get("audit_view") or {}
     missing = audit.get("missing_data") or []
@@ -122,6 +123,23 @@ def _audit_fix_missing(out_dict: dict, mini_chart: str) -> dict:
 
     missing = sorted(missing_set)
     audit["missing_data"] = missing
+
+    # If QTc is missing, make risk_summary clinically honest (avoid "higher risk signals present")
+    if "QTc" in missing:
+        meds_match = re.search(r"(?i)\bmeds?\s*:\s*(.+)", mini_chart or "")
+        meds = meds_match.group(1).strip() if meds_match else ""
+        if meds:
+            meds_short = meds[:160] + ("..." if len(meds) > 160 else "")
+            out_dict["risk_summary"] = (
+                "QT risk cannot be fully assessed without QTc. "
+                f"Medications listed include: {meds_short}. "
+                "Obtain ECG/QTc to complete risk assessment."
+            )
+        else:
+            out_dict["risk_summary"] = (
+                "QT risk cannot be fully assessed without QTc. "
+                "Obtain ECG/QTc to complete risk assessment."
+            )
 
     # 3) Fix notes so they don't contradict missing_data
     notes = audit.get("notes") or []
@@ -281,3 +299,4 @@ if st.session_state["last_result"] is not None:
 
     st.subheader("Audit view")
     render_audit_view(out_dict.get("audit_view", {}))
+
