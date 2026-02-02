@@ -1,3 +1,7 @@
+
+[![CI](https://github.com/johnifedili/qtguard/actions/workflows/ci.yml/badge.svg)](https://github.com/johnifedili/qtguard/actions/workflows/ci.yml)
+
+
 # QTGuard — Offline QT Medication Safety Copilot (MedGemma / HAI-DEF)
 
 QTGuard is a human-centered, offline-capable medication safety copilot that helps clinicians (especially inpatient/ED pharmacists) triage **QT-prolongation risk** from a compact, de-identified “mini-chart” and produce a structured, actionable plan.
@@ -12,9 +16,13 @@ Given a mini-chart (med list + QTc + key labs + risk factors), QTGuard generates
 3. **Patient-friendly counseling** (plain language explanation)
 4. **Audit view** (inputs used + missing data + safe deferrals)
 
+
+**Try it:** paste a mini-chart → click **Generate plan** → inspect Evidence + Audit view for traceability.
+
 > Disclaimer: QTGuard is a research/demo prototype for decision support. It is not a medical device and must not be used for autonomous clinical decisions.
 
 ---
+
 ## Quickstart (local)
 
 1) Create a virtual environment:
@@ -32,6 +40,7 @@ Given a mini-chart (med list + QTc + key labs + risk factors), QTGuard generates
 Open in your browser:
 - `http://127.0.0.1:8501` (preferred)
 - `http://localhost:8501`
+
 
 ## Offline evaluation harness
 
