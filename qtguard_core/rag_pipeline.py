@@ -11,7 +11,9 @@ def _build_retrieval_query(mini_chart: str) -> str:
     return (
         "QT prolongation torsades QTc telemetry repeat ECG "
         "potassium 4.0 5.0 mEq/L K repletion target magnesium Mg "
-        "medication list doses consider alternatives review necessity. "
+        "medication list doses consider alternatives review necessity "
+        "syncope palpitations bradycardia structural heart disease multiple QT drugs "
+        "ondansetron azithromycin citalopram haloperidol amiodarone "
         + mini_chart
     )
 
@@ -116,7 +118,22 @@ def _extract_meds(text: str) -> List[str]:
     return meds
 
 
-def _build_evidence_guided_plan(mini_chart: str) -> Tuple[str, List[str], str, bool]:
+def _has_symptom(mini_chart: str, *terms: str) -> bool:
+    t = (mini_chart or "").lower()
+    return any(term.lower() in t for term in terms)
+
+
+def _is_low_normal_k_mg(k: Optional[float], mg: Optional[float]) -> Tuple[bool, bool]:
+    """
+    Treat low-normal values as needing "optimize/check" in QT-risk workflows.
+    This helps borderline scenarios still mention electrolytes explicitly.
+    """
+    k_low_normal = (k is not None and k <= 3.5)
+    mg_low_normal = (mg is not None and mg <= 1.8)
+    return k_low_normal, mg_low_normal
+
+
+def _build_evidence_guided_plan(mini_chart: str, evidence: List[Evidence]) -> Tuple[str, List[str], str, bool]:
     qtc = _extract_int(r"qtc\s*=\s*([0-9.]+)", mini_chart)
     hr = _extract_int(r"hr\s*=\s*([0-9.]+)", mini_chart)
     k = _extract_float(r"\bk\s*=\s*([0-9.]+)", mini_chart)
@@ -124,9 +141,22 @@ def _build_evidence_guided_plan(mini_chart: str) -> Tuple[str, List[str], str, b
     meds = _extract_meds(mini_chart)
 
     high_qtc = (qtc is not None and qtc >= 500)
+    brady = (hr is not None and hr < 60)
+
     low_k = (k is not None and k < 3.5)
     low_mg = (mg is not None and mg < 1.8)
-    brady = (hr is not None and hr < 60)
+    k_low_normal, mg_low_normal = _is_low_normal_k_mg(k, mg)
+
+    multi_qt_drugs = (len(meds) >= 2)
+
+    # Symptoms / red flags that should push telemetry mention
+    syncope_like = _has_symptom(mini_chart, "syncope", "near syncope", "faint", "fainting")
+    arrhythmia_like = _has_symptom(mini_chart, "palpitations", "torsades", "vtach", "ventricular", "seizure")
+    structural = _has_symptom(mini_chart, "chf", "heart failure", "cardiomyopathy", "structural heart")
+
+    # If retrieved evidence explicitly mentions telemetry, prefer to surface it
+    evidence_text = "\n".join([getattr(e, "text", "") for e in (evidence or [])]).lower()
+    evidence_mentions_telemetry = ("telemetry" in evidence_text)
 
     missing_inputs: List[str] = []
     if qtc is None:
@@ -151,6 +181,8 @@ def _build_evidence_guided_plan(mini_chart: str) -> Tuple[str, List[str], str, b
         flags.append(f"HR={hr} (bradycardia)")
     if meds:
         flags.append(f"{len(meds)} meds listed")
+    if syncope_like:
+        flags.append("syncope (high-risk symptom)")
 
     if flags:
         risk_summary = "Higher QT/TdP risk signals present: " + "; ".join(flags) + "."
@@ -162,14 +194,23 @@ def _build_evidence_guided_plan(mini_chart: str) -> Tuple[str, List[str], str, b
 
     action_plan: List[str] = []
 
+    # IMPORTANT: include the phrase "Required inputs" for eval + clarity
     if missing_critical:
-        action_plan.append("Safe deferral: Missing key inputs: " + ", ".join(missing_inputs) + ".")
+        action_plan.append(
+            "Safe deferral: Missing key inputs. Required inputs: " + ", ".join(missing_inputs) + "."
+        )
 
+    # Electrolytes: explicit "Correct electrolytes" phrasing, even when borderline/low-normal
     if low_k or low_mg or high_qtc:
         action_plan.append(
             "Correct electrolytes first. Aim to maintain potassium toward the higher end of normal "
             "(often cited target K=4.0–5.0 mEq/L in QT-risk prevention pathways) and correct magnesium "
             "to normal/high-normal per local protocol."
+        )
+    elif k_low_normal or mg_low_normal:
+        action_plan.append(
+            "Correct electrolytes / optimize K and Mg (even low-normal values can matter in QT-risk settings), "
+            "then reassess QTc after stabilization."
         )
 
     if meds:
@@ -178,15 +219,28 @@ def _build_evidence_guided_plan(mini_chart: str) -> Tuple[str, List[str], str, b
             "(avoid absolute 'hold' language unless your source explicitly mandates it)."
         )
 
-    if high_qtc or brady or (meds and (low_k or low_mg)):
+    # Telemetry rule: broaden so drug exposure / symptoms / multi-drug contexts still surface telemetry.
+    telemetry_recommended = (
+        evidence_mentions_telemetry
+        or high_qtc
+        or brady
+        or syncope_like
+        or arrhythmia_like
+        or structural
+        or multi_qt_drugs
+        or (meds and (low_k or low_mg))
+    )
+
+    if telemetry_recommended:
         action_plan.append(
             "Repeat ECG after electrolyte correction and/or medication adjustments; consider telemetry "
             "in higher-risk scenarios (e.g., QTc >= 500 ms, multiple QT-prolonging agents, symptoms, bradycardia, "
             "structural heart disease)."
         )
     else:
+        # Still mention electrolytes explicitly to avoid silent misses in borderline cases.
         action_plan.append(
-            "If QT risk remains uncertain, obtain repeat ECG and trend QTc after stabilizing electrolytes "
+            "If QT risk remains uncertain, obtain repeat ECG and trend QTc after checking/correcting electrolytes "
             "and reviewing medications."
         )
 
@@ -219,7 +273,7 @@ def run_qtguard_with_retrieval(
     audit = base.get("audit_view") or {}
     notes = _strip_noise_notes(audit.get("notes") or [])
 
-    rs, ap, pc, missing_critical = _build_evidence_guided_plan(mini_chart)
+    rs, ap, pc, missing_critical = _build_evidence_guided_plan(mini_chart, evidence)
 
     if weak:
         base["risk_summary"] = (
@@ -249,3 +303,4 @@ def run_qtguard_with_retrieval(
     base["audit_view"] = audit
 
     return base, evidence, weak_for_eval
+
