@@ -303,4 +303,3 @@ def run_qtguard_with_retrieval(
     base["audit_view"] = audit
 
     return base, evidence, weak_for_eval
-
